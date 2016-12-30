@@ -1096,6 +1096,43 @@ func TestMetaFrameHeader(t *testing.T) {
 	}
 }
 
+func TestSetReuseDataFrame(t *testing.T) {
+	fr, buf := testFramer()
+	fr.SetReuseDataFrame()
+	firstDf := readAndVerifyDataFrame("ABC", fr, buf, t)
+
+	for i := 1; i <= 10; i++ {
+		df := readAndVerifyDataFrame("XYZ", fr, buf, t)
+		if df != firstDf {
+			t.Errorf("Expected Framer to return references to the same DataFrame object")
+		}
+	}
+}
+
+func readAndVerifyDataFrame(data string, fr *Framer, buf *bytes.Buffer, t *testing.T) *DataFrame {
+	var streamID uint32 = 1<<24 + 2<<16 + 3<<8 + 4
+	fr.WriteData(streamID, true, []byte(data))
+	wantEnc := "\x00\x00\x03\x00\x01\x01\x02\x03\x04" + data
+	if buf.String() != wantEnc {
+		t.Errorf("encoded as %q; want %q", buf.Bytes(), wantEnc)
+	}
+	f, err := fr.ReadFrame()
+	if err != nil {
+		t.Fatal(err)
+	}
+	df, ok := f.(*DataFrame)
+	if !ok {
+		t.Fatalf("got %T; want *DataFrame", f)
+	}
+	if !bytes.Equal(df.Data(), []byte(data)) {
+		t.Errorf("got %q; want %q", df.Data(), []byte(data))
+	}
+	if f.Header().Flags&1 == 0 {
+		t.Errorf("didn't see END_STREAM flag")
+	}
+	return df
+}
+
 func encodeHeaderRaw(t *testing.T, pairs ...string) []byte {
 	var he hpackEncoder
 	return he.encodeHeaderRaw(t, pairs...)
