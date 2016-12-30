@@ -125,7 +125,6 @@ var flagName = map[FrameType]map[Flags]string{
 type frameParser func(fh FrameHeader, payload []byte) (Frame, error)
 
 var frameParsers = map[FrameType]frameParser{
-	FrameData:         parseDataFrame,
 	FrameHeaders:      parseHeadersFrame,
 	FramePriority:     parsePriorityFrame,
 	FrameRSTStream:    parseRSTStreamFrame,
@@ -321,6 +320,7 @@ type Framer struct {
 
 	debugFramer    *Framer // only use for logging written writes
 	debugFramerBuf *bytes.Buffer
+	getDataFrame   func() *DataFrame
 }
 
 func (fr *Framer) maxHeaderListSize() uint32 {
@@ -396,6 +396,14 @@ const (
 	maxFrameSize    = 1<<24 - 1
 )
 
+// If set, fields within a "DataFrame" are only valid until the next call to "ReadFrame"
+// Memory optimization to reduce creation of DataFrame struct objects
+func (fr *Framer) WithReuseDataFrame() *Framer {
+	df := &DataFrame{}
+	fr.getDataFrame = func() *DataFrame { return df }
+	return fr
+}
+
 // NewFramer returns a Framer that writes frames to w and reads them from r.
 func NewFramer(w io.Writer, r io.Reader) *Framer {
 	fr := &Framer{
@@ -411,7 +419,12 @@ func NewFramer(w io.Writer, r io.Reader) *Framer {
 		return fr.readBuf
 	}
 	fr.SetMaxReadFrameSize(maxFrameSize)
+	fr.getDataFrame = defaultGetDataFrame
 	return fr
+}
+
+func defaultGetDataFrame() *DataFrame {
+	return &DataFrame{}
 }
 
 // SetMaxReadFrameSize sets the maximum size of a frame
@@ -472,7 +485,12 @@ func (fr *Framer) ReadFrame() (Frame, error) {
 	if _, err := io.ReadFull(fr.r, payload); err != nil {
 		return nil, err
 	}
-	f, err := typeFrameParser(fh.Type)(fh, payload)
+	var f Frame
+	if fh.Type == FrameData {
+	  f, err = parseDataFrame(fh, payload, fr.getDataFrame())
+	} else {
+	  f, err = typeFrameParser(fh.Type)(fh, payload)
+	}
 	if err != nil {
 		if ce, ok := err.(connError); ok {
 			return nil, fr.connError(ce.Code, ce.Reason)
@@ -560,7 +578,7 @@ func (f *DataFrame) Data() []byte {
 	return f.data
 }
 
-func parseDataFrame(fh FrameHeader, payload []byte) (Frame, error) {
+func parseDataFrame(fh FrameHeader, payload []byte, f *DataFrame) (Frame, error) {
 	if fh.StreamID == 0 {
 		// DATA frames MUST be associated with a stream. If a
 		// DATA frame is received whose stream identifier
@@ -569,9 +587,8 @@ func parseDataFrame(fh FrameHeader, payload []byte) (Frame, error) {
 		// PROTOCOL_ERROR.
 		return nil, connError{ErrCodeProtocol, "DATA frame with stream ID 0"}
 	}
-	f := &DataFrame{
-		FrameHeader: fh,
-	}
+	f.FrameHeader = fh
+
 	var padSize byte
 	if fh.Flags.Has(FlagDataPadded) {
 		var err error
