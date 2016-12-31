@@ -419,7 +419,8 @@ func NewFramer(w io.Writer, r io.Reader) *Framer {
 		return fr.readBuf
 	}
 	fr.SetMaxReadFrameSize(maxFrameSize)
-	fr.getDataFrame = defaultGetDataFrame
+	df := &DataFrame{}
+	fr.getDataFrame = func() *DataFrame { return df }
 	return fr
 }
 
