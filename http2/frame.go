@@ -411,7 +411,9 @@ func (fr *Framer) SetReuseFrames() {
 }
 
 type frameCache struct {
-	dataFrame DataFrame
+	dataFrame        DataFrame
+	headersFrame     HeadersFrame
+	metaHeadersFrame MetaHeadersFrame
 }
 
 func (fc *frameCache) getDataFrame() *DataFrame {
@@ -419,6 +421,21 @@ func (fc *frameCache) getDataFrame() *DataFrame {
 		return &DataFrame{}
 	}
 	return &fc.dataFrame
+}
+
+func (fc *frameCache) getHeadersFrame() *HeadersFrame {
+	if fc == nil {
+		return &HeadersFrame{}
+	}
+	return &fc.headersFrame
+}
+
+func (fc *frameCache) getMetaHeadersFrame() *MetaHeadersFrame {
+	if fc == nil {
+		return &MetaHeadersFrame{}
+	}
+	fc.metaHeadersFrame.Fields = fc.metaHeadersFrame.Fields[:0]
+	return &fc.metaHeadersFrame
 }
 
 // NewFramer returns a Framer that writes frames to w and reads them from r.
@@ -514,7 +531,7 @@ func (fr *Framer) ReadFrame() (Frame, error) {
 		fr.debugReadLoggerf("http2: Framer %p: read %v", fr, summarizeFrame(f))
 	}
 	if fh.Type == FrameHeaders && fr.ReadMetaHeaders != nil {
-		return fr.readMetaFrame(f.(*HeadersFrame))
+		return fr.readMetaFrame(fr.frameCache, f.(*HeadersFrame))
 	}
 	return f, nil
 }
@@ -953,10 +970,10 @@ func (f *HeadersFrame) HasPriority() bool {
 	return f.FrameHeader.Flags.Has(FlagHeadersPriority)
 }
 
-func parseHeadersFrame(_ *frameCache, fh FrameHeader, p []byte) (_ Frame, err error) {
-	hf := &HeadersFrame{
-		FrameHeader: fh,
-	}
+func parseHeadersFrame(fc *frameCache, fh FrameHeader, p []byte) (_ Frame, err error) {
+	hf := fc.getHeadersFrame()
+	hf.FrameHeader = fh
+
 	if fh.StreamID == 0 {
 		// HEADERS frames MUST be associated with a stream. If a HEADERS frame
 		// is received whose stream identifier field is 0x0, the recipient MUST
@@ -1444,13 +1461,13 @@ func (fr *Framer) maxHeaderStringLen() int {
 // readMetaFrame returns 0 or more CONTINUATION frames from fr and
 // merge them into into the provided hf and returns a MetaHeadersFrame
 // with the decoded hpack values.
-func (fr *Framer) readMetaFrame(hf *HeadersFrame) (*MetaHeadersFrame, error) {
+func (fr *Framer) readMetaFrame(fc *frameCache, hf *HeadersFrame) (*MetaHeadersFrame, error) {
 	if fr.AllowIllegalReads {
 		return nil, errors.New("illegal use of AllowIllegalReads with ReadMetaHeaders")
 	}
-	mh := &MetaHeadersFrame{
-		HeadersFrame: hf,
-	}
+	mh := fc.getMetaHeadersFrame()
+	mh.HeadersFrame = hf
+
 	var remainSize = fr.maxHeaderListSize()
 	var sawRegular bool
 

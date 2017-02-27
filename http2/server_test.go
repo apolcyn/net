@@ -384,6 +384,13 @@ func (st *serverTester) encodeHeader(headers ...string) []byte {
 		st.encodeHeaderField(":scheme", "https")
 		st.encodeHeaderField(":authority", defaultAuthority)
 		st.encodeHeaderField(":path", "/")
+		st.encodeHeaderField("a", "/")
+		st.encodeHeaderField("b", "/")
+		st.encodeHeaderField("c", "/")
+		st.encodeHeaderField("d", "/")
+		st.encodeHeaderField("e", "/")
+		st.encodeHeaderField("f", "/")
+		st.encodeHeaderField("g", "/")
 		return st.headerBuf.Bytes()
 	}
 
@@ -2968,7 +2975,7 @@ func BenchmarkServerGets(b *testing.B) {
 	const msg = "Hello, world"
 	st := newServerTester(b, func(w http.ResponseWriter, r *http.Request) {
 		io.WriteString(w, msg)
-	})
+	}, optFramerReuseFrames)
 	defer st.Close()
 	st.greet()
 
